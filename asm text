@@ -1,0 +1,606 @@
+; Authors: Tyler Ziegler, Yaro Shcherbanyuk
+; 16 Dec, 2014
+;
+; Description: Pig, the game
+;
+; nasm -f elf -g -F stabs final.asm
+; ld -o final final.o -melf_i386
+; 
+
+section .bss
+
+section .data
+
+	greet: db "Dice game. Rules: reach a score of 100 to win, take turns against a computer rolling dice. Rolling 1 forfeits your turn, 2-6 adds to your turn total. Press s to start or any other key to quit:"   		;  first user message
+	greetL: equ $-greet                   		 			; | greet msg length
+	startRollMsg: db "Press r to roll or any other key to hold: "		; | msg for user
+	sRM: equ $-startRollMsg
+	RollMsg: db "Dice rolled: "
+	RollMsgLen: equ $-RollMsg
+	TurnLostMsg: db "Lose turn, turn total will not be added to score." , 10
+	TurnLostMsgLen: equ $-TurnLostMsg
+	cpuTurnLostMsg: db "Computer lost turn, turn total will not be added to score." , 10
+	cpuTurnLostMsgLen: equ $-cpuTurnLostMsg
+	TurnTotalMsg: db "Turn total so far: "
+	TurnTotalMsgLen: equ $-TurnTotalMsg
+	TurnOptions: db "Press r to roll again or any key to end turn: "
+	TurnOptionsLen: equ $-TurnOptions
+	PlayerScoreMsg: db "Player's score: "
+	PlayerScoreMsgLen: equ $-PlayerScoreMsg
+	CpuScoreMsg: db "Computer's score: "
+	CpuScoreMsgLen: equ $-CpuScoreMsg
+	CpuTurnMsg: db "Computer's turn to roll dice"
+	CpuTurnMsgLen: equ $-CpuTurnMsg
+	cpuWillRoll: db "Computer will now roll.",10
+	cpuWillRollLen: equ $-cpuWillRoll
+	cpuHoldMsg: db "Computer decides to hold, you will be rolling next.",10
+	cpuHoldMsgLen: equ $-cpuHoldMsg
+	userWinsMsg: db "You reached 100 first, you win!",10
+	userWinsMsgLen: equ $-userWinsMsg
+	cpuWinsMsg: db "The computer reached 100 first, you lose!",10
+	cpuWinsMsgLen: equ $-cpuWinsMsg
+	yourTurnMsg: db "Your turn to roll!",10
+	yourTurnMsgLen: equ $-yourTurnMsg
+	cycleCpuTurnsMsg: db "Enter any key to cycle through computer's turn: "
+	cycleCpuTurnsMsgLen: equ $-cycleCpuTurnsMsg
+	quitMsg: db "You have exited the game." , 10
+	quitLen: equ $-quitMsg
+
+	userScore: dd 0
+	cpuScore: dd 0
+	turnTotal: dd 0
+	cpuRolling: dd 0 ; 0 is no(User rolling) 
+
+	computerScore: dd 0
+
+	prime: dd 17
+	newlin: db 10
+
+	input: db 0
+
+section .text
+    global _start:
+_start:
+	mov eax, 4        ; display 
+	mov ebx, 1        ; | stdout
+	mov ecx, greet    ; | greet msg
+	mov edx, greetL   ; | greet msg length
+	int 80h           ; \ system call
+	call getInput
+CheckS:
+	mov BL, [input]      ; | moves input into BL
+	mov BH, 115          ; | moves 114 into BH
+	cmp BL, BH           ; | compares BL, BH
+	je startRoll        ; \ jumps to function firstroll if BL is not 0
+	mov BH, 83        	; | moves 82 into BH
+	cmp BL, BH        	; | compares BL, BH
+	jne end            	; | jumps to function end if BL is not equal to 83
+	jmp WhosRolling       	; \ jumps to function firstroll if BL is 83
+WhosRolling:
+	mov BL, [cpuRolling]	;starting out with user rolling
+	mov BH, 0		; checking it for 0, if it is user will rol	
+	cmp BL, BH		; if its  not, computer will go
+	je startRoll
+
+	jmp startcpuRoll
+startRoll:
+	mov eax, 4     	   	; | display
+	mov ebx, 1      	; | stdout
+	mov ecx, startRollMsg   ; | firstrollmsg is called
+	mov edx, sRM      	; | moves length of frm in
+	int 80h                 ; \ system call
+
+	call pleasegetIn
+
+	mov BL, [input]
+	mov BH, 82
+	cmp BL, BH
+	je Roll
+	mov BH, 114
+	cmp BL, BH
+	je Roll	
+
+	jmp ScoreCard	
+Roll:
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, RollMsg	;displays Dice rolled:
+	mov edx, RollMsgLen
+	int 80h
+
+	mov eax, 13	;calls system time using opcode 13
+	push eax	;saves system time
+	mov ebx, esp	; stack pointer moves 
+	int 80H		;system call
+
+	pop eax	
+	mul dword[prime]	
+	xor ah,ah	;clear ah to help diversify number
+	mov ecx, 6	;divides by 6
+	div ecx		;divides ecx and stores in edx
+	add edx, 1	;adds one so range is within 1-6
+
+	add edx, 48	;converts to asc2
+	push edx	;pushes the asc2 number into the stack	
+    
+	mov eax,4
+	mov ebx,1
+	mov ecx, esp	;points to the stack
+	mov edx, 1	;the length of the message
+	int 80h		;calls system
+	
+	pop eax
+	sub eax, 48	; group converts asc back to decimal
+	push eax
+
+	call newline
+
+	pop eax
+	mov ebx, 1	; group checks if diceroll is 1, jumps if not 1
+	cmp eax, ebx
+	jne Trntotal
+
+	call newline
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, TurnLostMsg	; displays lose a turn message
+	mov edx, TurnLostMsgLen
+	int 80h
+
+	mov eax, [turnTotal]
+	sub [turnTotal], eax
+	mov eax, 1
+	add [cpuRolling], eax
+	
+	jmp turnTable
+startcpuRoll:
+	call newline
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, cpuWillRoll
+	mov edx, cpuWillRollLen
+	int 80h
+
+	call cycleCpuTurns
+	call cpuRollMsg
+
+	mov eax, 13	;calls system time using opcode 13
+	push eax	;saves system time
+	mov ebx, esp	; stack pointer moves 
+f	int 80H		;system call
+
+	pop eax	
+	mul dword[prime]	
+	xor ah,ah	;clear ah to help diversify number
+	mov ecx, 6	;divides by 6
+	div ecx		;divides ecx and stores in edx
+	add edx, 1	;adds one so range is within 1-6
+
+	add edx, 48	;converts to asc2
+	push edx	;pushes the asc2 number into the stack	
+    
+	mov eax,4
+	mov ebx,1
+	mov ecx, esp	;points to the stack
+	mov edx, 1	;the length of the message
+	int 80h		;calls system
+	
+	pop eax
+	sub eax, 48	; group converts asc back to decimal
+	push eax
+
+	call newline
+
+	pop eax
+	mov ebx, 1	; group checks if diceroll is 1, jumps if not 1
+	cmp eax, ebx
+	je cpuLostTurn
+	call Trntotal
+
+cpuRolls:
+	call cycleCpuTurns
+	call shouldcpuRollAgain
+	call cpuRollMsg
+
+	mov eax, 13	;calls system time using opcode 13
+	push eax	;saves system time
+	mov ebx, esp	; stack pointer moves 
+	int 80H		;system call
+
+	pop eax	
+	mul dword[prime]	
+	xor ah,ah	;clear ah to help diversify number
+	mov ecx, 6	;divides by 6
+	div ecx		;divides ecx and stores in edx
+	add edx, 1	;adds one so range is within 1-6
+
+	add edx, 48	;converts to asc2
+	push edx	;pushes the asc2 number into the stack	
+    
+	mov eax,4
+	mov ebx,1
+	mov ecx, esp	;points to the stack
+	mov edx, 1	;the length of the message
+	int 80h		;calls system
+	
+	pop eax
+	sub eax, 48	; group converts asc back to decimal
+	push eax
+
+	call newline
+
+	pop eax
+	mov ebx, 1	; group checks if diceroll is 1, jumps if not 1
+	cmp eax, ebx
+	je cpuLostTurn
+	call Trntotal
+
+cpuLostTurn:
+	call newline
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, cpuTurnLostMsg	; displays lose a turn message
+	mov edx, cpuTurnLostMsgLen
+	int 80h
+
+	call newline
+	call ScoreCard
+	call newline
+	call yourTurn
+
+	mov eax, 1
+	sub [cpuRolling], eax
+
+	mov eax, [turnTotal]
+	sub [turnTotal], eax
+	jmp startRoll
+	
+Trntotal:
+	push eax
+
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, TurnTotalMsg		; turn total message is displayed
+	mov edx, TurnTotalMsgLen
+	int 80h
+
+	pop eax				; adds diceroll to turnTotal
+	mov ebx, [turnTotal]
+	add ebx, eax
+	mov [turnTotal], ebx
+	
+	mov eax, [turnTotal]	; | begin int to string converter
+	mov edx, 0
+	mov ebx, 10
+	div ebx
+	add edx, 48
+	push edx
+	add eax, 48
+	push eax
+	mov ecx, 0
+	mov [turnTotal], ecx
+	
+	mov eax, 4		;prints quotient
+	mov ebx, 1
+	mov ecx, esp	
+	mov edx, 1
+	int 80h
+
+	pop eax			;turns quotient back into the proper number and inputs it in turnTotal
+	sub eax, 48
+	imul eax, 10
+	add [turnTotal], eax
+	xor eax, eax
+	
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, esp		;prints remainder
+	mov edx, 1
+	int 80h
+
+	pop eax			;turns remainder back into the proper number and inputs it in turnTotal
+	sub eax, 48
+	add [turnTotal], eax
+	xor eax, eax
+
+	call newline
+
+	mov BL, [cpuRolling]
+	mov BH, 0
+	cmp BL, BH
+	jne cpuRolls
+
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, TurnOptions		;lists options for turn
+	mov edx, TurnOptionsLen
+	int 80h
+
+	call pleasegetIn
+
+	mov BL, [input]
+	mov BH, 82
+	cmp BL, BH
+	je Roll			;group checks for char r/R to reroll
+	mov BH, 114
+	cmp BL, BH
+	je Roll
+
+	mov eax, [turnTotal]	; !!!!!! wont work under playerscore
+	add [userScore], eax
+	call checkUserWin
+	sub [turnTotal], eax
+	 
+	mov eax, 1		; switching turn to computer
+	add [cpuRolling], eax
+turnTable:		; this is where whos turn is decided
+	call newline
+	call ScoreCard
+	call WhosRolling	;temporary
+;						!!! Functions below !!!	
+shouldcpuRollAgain:
+	mov eax, 13	;calls system time using opcode 13
+	push eax	;saves system time
+	mov ebx, esp	; stack pointer moves 
+	int 80H		;system call
+
+	pop eax	
+	mul dword[prime]	
+	xor ah,ah	;clear ah to help diversify number
+	mov ecx, 6	;divides by 6
+	div ecx		;divides ecx and stores in edx
+	add edx, 1	;adds one so range is within 1-6
+
+	mov eax, 2
+	cmp edx, eax
+	je cpuHold
+	
+	mov eax, 3
+	cmp edx, eax
+	je cpuHold
+	ret
+cpuHold: 
+	call newline
+
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, cpuHoldMsg
+	mov edx, cpuHoldMsgLen
+	int 80h
+
+	mov eax, [turnTotal]	; 
+	add [computerScore], eax
+
+	call checkCpuWin	; checking if computer wins
+
+	call newline
+	call ScoreCard
+	call newline
+	call yourTurn
+	
+	mov eax, [turnTotal]
+	sub [turnTotal], eax
+	mov eax, 1
+	sub [cpuRolling], eax
+
+	jmp WhosRolling
+checkCpuWin:
+	mov BL, [computerScore]
+	mov BH, 99
+	cmp BL, BH
+	jg cpuWins
+	ret
+checkUserWin:
+	mov BL, [userScore]
+	mov BH, 99
+	cmp BL, BH
+	jg userWins
+	ret
+cpuWins:
+	call newline
+
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, cpuWinsMsg
+	mov edx, cpuWinsMsgLen
+	int 80h
+	call end
+userWins:
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, userWinsMsg
+	mov edx, userWinsMsgLen
+	int 80h
+	call end
+ScoreCard:
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, PlayerScoreMsg
+	mov edx, PlayerScoreMsgLen
+	int 80h
+	
+	mov eax, [userScore]	; | begin int to string converter
+	mov edx, 0
+	mov ebx, 100
+	div ebx
+	add eax, 48
+	mov ecx, 0
+	mov [userScore], eax
+	mov eax, edx
+	mov edx, 0
+	mov ebx, 10
+	div ebx
+	add edx, 48
+	push edx
+	add eax, 48
+	push eax
+	mov ecx, [userScore]
+	push ecx
+	mov ecx, 0
+	mov [userScore], ecx
+	
+	mov eax, 4		;prints quotient
+	mov ebx, 1
+	mov ecx, esp	
+	mov edx, 1
+	int 80h
+
+	pop eax			;turns quotient back into the proper number and inputs it in turnTotal
+	sub eax, 48
+	imul eax, 100
+	add [userScore], eax
+	xor eax, eax
+	
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, esp		;prints remainder
+	int 80h
+
+	pop eax			;turns remainder back into the proper number and inputs it in turnTotal
+	sub eax, 48
+	imul eax, 10
+	add [userScore], eax
+	xor eax, eax
+
+	mov eax, 4		;prints quotient
+	mov ebx, 1
+	mov ecx, esp	
+	mov edx, 1
+	int 80h
+
+	pop eax			;turns quotient back into the proper number and inputs it in turnTotal
+	sub eax, 48
+	add [userScore], eax
+	xor eax, eax
+
+	call newline
+
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, CpuScoreMsg
+	mov edx, CpuScoreMsgLen
+	int 80h
+	
+	mov eax, [computerScore]	; | begin int to string converter
+	mov edx, 0
+	mov ebx, 100
+	div ebx
+	add eax, 48
+	mov ecx, 0
+	mov [computerScore], eax
+	mov eax, edx
+	mov edx, 0
+	mov ebx, 10
+	div ebx
+	add edx, 48
+	push edx
+	add eax, 48
+	push eax
+	mov ecx, [computerScore]
+	push ecx
+	mov ecx, 0
+	mov [computerScore], ecx
+
+	mov eax, 4		;prints quotient
+	mov ebx, 1
+	mov ecx, esp	
+	mov edx, 1
+	int 80h
+
+	pop eax			;turns quotient back into the proper number and inputs it in cpuScore
+	sub eax, 48
+	imul eax, 100
+	add [computerScore], eax
+	xor eax, eax
+	
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, esp		;prints remainder
+	int 80h
+
+	pop eax			;turns remainder back into the proper number and inputs it in cpuScore
+	sub eax, 48
+	imul eax, 10
+	add [computerScore], eax
+	xor eax, eax
+
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, esp		;prints remainder
+	int 80h
+
+	pop eax			;turns quotient back into the proper number and inputs it in cpuScore
+	sub eax, 48
+	add [computerScore], eax
+	xor eax, eax
+
+	call newline
+	ret
+getInput:
+	mov eax, 3        ; input
+	mov ebx, 0        ; | stdin
+	mov ecx, input    ; | stores variable in input
+	mov edx, 1        ; | length of input
+	int 80h           ; \ system call
+	ret
+yourTurn:
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, yourTurnMsg
+	mov edx, yourTurnMsgLen
+	int 80h
+	ret
+pleasegetIn:
+	mov eax, 3        ; input
+	mov ebx, 0        ; | stdin
+	mov ecx, input    ; | stores variable in input
+	mov edx, 1        ; | length of input
+	int 80h           ; \ system call
+								;wtf? needs to be put twice to work properly?
+	mov eax, 3        ; input
+	mov ebx, 0        ; | stdin
+	mov ecx, input    ; | stores variable in input
+	mov edx, 1        ; | length of input
+	int 80h           ; \ system call
+	ret
+newline:
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, newlin	;newline
+	mov edx, 1
+	int 80h
+	ret
+cycleCpuTurns:
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, cycleCpuTurnsMsg
+	mov edx, cycleCpuTurnsMsgLen
+	int 80h
+	
+	call getInput
+	call getInput
+
+	ret
+cpuRollMsg:
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, RollMsg	;displays Dice rolled:
+	mov edx, RollMsgLen
+	int 80h
+	ret
+end:
+	call newline
+	call ScoreCard
+	call newline
+
+	mov eax, 4
+	mov ebx, 1
+	mov ecx, quitMsg
+	mov edx, quitLen
+	int 80h
+	
+	call newline
+
+	mov eax, 1         ; | system exit code
+	mov ebx, 0	   ; | return code
+	int 80h            ; \ system call
